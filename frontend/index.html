@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>URL Shortener</title>
+</head>
+<body>
+
+    <h2>Simple URL Shortener</h2>
+
+    <input type="text" id="longUrl" placeholder="Enter long URL" size="50">
+    <button onclick="shortenUrl()">Shorten</button>
+
+    <p id="result"></p>
+
+    <script>
+        async function shortenUrl() {
+            const longUrl = document.getElementById("longUrl").value;
+
+            const response = await fetch("http://127.0.0.1:8000/shorten", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ long_url: longUrl })
+            });
+
+            const data = await response.json();
+
+            const shortUrl = "http://127.0.0.1:8000/" + data.short_code;
+
+            document.getElementById("result").innerHTML =
+                `<a href="${shortUrl}" target="_blank">${shortUrl}</a>`;
+        }
+    </script>
+
+</body>
+</html>

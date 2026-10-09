@@ -1,1 +1,0 @@
-why do we need to use distributed id generator ?

@@ -110,7 +110,7 @@ COLD  (guaranteed miss)
       ~3.5k req/s · mean ~28ms
 ```
 
-Those figures are from the historical Python deployment that still serves the live demo. The Go port's equivalent measurements are in [Performance](#performance) below.
+Those figures are from the historical Python deployment, which is still online for comparison. The Go port's equivalent measurements are in [Performance](#performance) below.
 
 Cold path is only honest if every request is a genuine miss — that requires codes nobody has ever requested. That's what `POST /seed_cold` exists for: it inserts never-before-seen codes directly into Postgres, bypassing the caches, so each one is guaranteed cold on first hit. Keep total requests under the number of seeded codes, or the client cycles back and starts measuring a warm path again.
 
@@ -187,7 +187,11 @@ Full writeups of all of these, including the dead ends, are in the running proje
 
 ## Live demo
 
-**Deployed: [https://infinity-vpko.onrender.com](https://infinity-vpko.onrender.com)** — free tier (Render web service + Neon Postgres + Upstash Redis); currently running the original Python deployment. Note it may take ~30s on first visit after idle time, since the free tier sleeps.
+**Go deployment (this repo): [https://snapurl-b29y.onrender.com](https://snapurl-b29y.onrender.com)** — free tier (Render web service + Neon Postgres + Upstash Redis), running the Go binary as a single process.
+
+**Original Python deployment: [https://infinity-vpko.onrender.com](https://infinity-vpko.onrender.com)** — kept online for comparison.
+
+Both free-tier services sleep after idle time, so the first visit can take ~30–50s.
 
 The frontend includes a "Run Benchmark" button that fires real concurrent requests from your own browser at the running backend and shows live, measured throughput and latency — not a static number, and with both **Hot path** (cache hit) and **Cold path** (guaranteed cache miss, straight to Postgres) modes. It's honestly labeled: browser-driven numbers will be noticeably lower than the table above, because browsers hard-cap concurrent connections per origin in a way dedicated load-testing tools aren't. The gap itself is part of the point — it's demonstrating what a real client can drive against this server, not trying to match a purpose-built benchmarking tool.
 
@@ -233,9 +237,9 @@ Same three-service topology as the original Python deployment, but the app runs 
    - **Manual:** New → Web Service → select the repo → Runtime **Docker** → Region **Ohio** → Plan **Free** → add the same two env vars (plus `GOMAXPROCS=1`) → Health Check Path `/stats`.
 
 ```bash
-# verify the deploy
-curl -s https://<service>.onrender.com/stats
-curl -s -X POST https://<service>.onrender.com/shorten \
+# verify the live deployment (swap in your own service URL for a fork)
+curl -s https://snapurl-b29y.onrender.com/stats
+curl -s -X POST https://snapurl-b29y.onrender.com/shorten \
   -H 'Content-Type: application/json' -d '{"long_url":"https://example.com"}'
 ```
 

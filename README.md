@@ -34,13 +34,28 @@ Most URL shortener tutorials stop at "map a short code to a long URL." This proj
 Client
   │
   ▼
-Go server (goroutine per request)
-  │
-  ├─► L1 cache (in-process LRU, shared) ─── hit? return immediately
-  │
-  ├─► L2 cache (Redis) ─── hit? promote to L1, return
-  │
-  └─► PostgreSQL (source of truth) ─── populate L1 + L2, return
+┌────────────────────────────────────────┐
+│ Go server                              │
+│ one process, goroutine per request     │
+└──────────────────┬─────────────────────┘
+                   │ lookup
+                   ▼
+┌────────────────────────────────────────┐
+│ L1: in-process LRU, TTL 60s            │──hit──► 307 redirect
+└──────────────────┬─────────────────────┘
+                   │ miss
+                   ▼
+┌────────────────────────────────────────┐
+│ L2: Redis, TTL 3600s                   │──hit──► promote to L1 → 307 redirect
+└──────────────────┬─────────────────────┘
+                   │ miss
+                   ▼
+┌────────────────────────────────────────┐
+│ PostgreSQL: source of truth            │──found──► populate L1 + L2 → 307 redirect
+└──────────────────┬─────────────────────┘
+                   │ not found
+                   ▼
+             404 Not Found
 ```
 
 **Note on processes:** the original Python implementation ran multiple `uvicorn` worker processes, each with its **own** L1 cache and its **own** `/stats` counters. The Go port runs as a **single process**: every goroutine shares one L1 cache and one set of counters, so `/stats` is a true aggregate for the process. If you run multiple replicas (e.g. several containers behind a load balancer), each replica still keeps its own L1 and counters.
@@ -50,24 +65,25 @@ Go server (goroutine per request)
 ### Request lifecycle (`GET /{short_code}`)
 
 ```
-Client
-  │
-  ▼
-┌──────────────────────────────────────────────────┐
-│ Go server (one process, goroutine per request)     │
-│                                                   │
-│  1. L1 lookup (in-process LRU, TTL 60s)          │──── hit ──► 307 redirect  (stats: l1_hits)
-│         │ miss                                    │
-│         ▼                                         │
-│  2. L2 lookup (Redis, TTL 3600s)                 │──── hit ──► promote into L1 ──► 307 redirect
-│         │ miss                                    │                             (stats: l2_hits)
-│         ▼                                         │
-│  3. PostgreSQL (source of truth, indexed)        │
-│         │ row found?                              │──── hit ──► populate L1 + L2 ──► 307 redirect
-│         │ no                                      │                             (stats: db_hits)
-│         ▼                                         │
-│     404 Not Found                                │             (stats: misses → not_found)
-└──────────────────────────────────────────────────┘
+GET /{short_code}
+    │
+    ▼
+┌────────────────────────────────────────────────┐
+│ 1. L1: in-process LRU, TTL 60s                 │──hit──► 307 redirect (l1_hits)
+└───┬────────────────────────────────────────────┘
+    │ miss
+    ▼
+┌────────────────────────────────────────────────┐
+│ 2. L2: Redis, TTL 3600s                        │──hit──► promote to L1 → 307 (l2_hits)
+└───┬────────────────────────────────────────────┘
+    │ miss
+    ▼
+┌────────────────────────────────────────────────┐
+│ 3. PostgreSQL: indexed by short_code           │──found──► populate L1 + L2 → 307 (db_hits)
+└───┬────────────────────────────────────────────┘
+    │ not found
+    ▼
+    404 Not Found (not_found)
 ```
 
 Every mutating call also **populates both cache levels** (lazy/write-through-on-read), so a cold miss warms L2 and L1 for all subsequent requests of the same code.
@@ -85,28 +101,37 @@ The L1 TTL (60s) is deliberately shorter than Redis's (3600s): L1 is a "thin, fa
 ### Hot path vs cold path (what the benchmark tool measures)
 
 ```
-HOT:   client → L1 → redirect                              (~4.5ms, ~20k req/s)
-COLD:  client → L1✗ → Redis✗ → Postgres → warm L1+L2 → redirect   (~28ms, ~3.5k req/s)
+HOT   (cache hit)
+      client ──► L1 hit ──► 307 redirect
+      ~20k req/s · p50 ~4.5ms
+
+COLD  (guaranteed miss)
+      client ──► L1 miss ──► Redis miss ──► Postgres ──► populate L1 + L2 ──► 307 redirect
+      ~3.5k req/s · mean ~28ms
 ```
+
+Those figures are from the historical Python deployment that still serves the live demo. The Go port's equivalent measurements are in [Performance](#performance) below.
 
 Cold path is only honest if every request is a genuine miss — that requires codes nobody has ever requested. That's what `POST /seed_cold` exists for: it inserts never-before-seen codes directly into Postgres, bypassing the caches, so each one is guaranteed cold on first hit. Keep total requests under the number of seeded codes, or the client cycles back and starts measuring a warm path again.
 
 ### Deployment topology (production, free tier)
 
 ```
-Browser / curl / hey / vegeta
-        │
-        ▼
-┌─────────────────────┐       ┌──────────────┐
-│   Render (app)       │       │              │
-│  Go binary (1 process)──────►│ Neon          │── source of truth (Postgres)
-│  net/http + L1 cache │       │  (managed)    │     (SSL required for remote)
-└─────────┬───────────┘       └──────────────┘
-          │
-          ▼
-┌─────────────────────┐
-│ Upstash (Redis)      │── L2 cache, rediss:// (TLS)
-└─────────────────────┘
+        Browser / curl / hey / vegeta
+                      │
+                      ▼
+      ┌────────────────────────────────┐
+      │ Render: Go binary (1 process)  │────────────────────────────┐
+      │ net/http + L1 cache            │                            │
+      └───────────────┬────────────────┘                            │
+                      │ redis://                      postgresql:// │
+                      │                                             │
+                      ▼                                             ▼
+      ┌────────────────────────────────┐            ┌────────────────────────────────┐
+      │ Upstash: Redis (L2)            │            │ Neon: Postgres                 │
+      │ shared cache                   │            │ source of truth                │
+      │ TLS via rediss://              │            │ SSL required                   │
+      └────────────────────────────────┘            └────────────────────────────────┘
 ```
 
 - All three services run in the **same region (AWS US East 2, Ohio)** so inter-service hops stay cheap.

@@ -144,7 +144,7 @@ The original deployed Python version measured:
 | **Hot** (cache hit, realistic multi-key traffic) | ~20,400 req/sec | ~4.5ms | 100% |
 | **Cold** (guaranteed cache miss, straight to PostgreSQL) | ~3,500 req/sec | ~28ms | 100% |
 
-These are two genuinely different numbers, measured separately and on purpose — see "Notable engineering findings" below for why that distinction matters and how the cold-path number was obtained.
+These are two genuinely different numbers, measured separately and on purpose — see "Notable engineering findings" below for why that distinction matters and how the cold-path number was obtained. The original Python implementation's full benchmark record, including its testing commands and historical results, is preserved in [`PYTHON_BENCHMARK.md`](./PYTHON_BENCHMARK.md).
 
 One additional result worth highlighting: an earlier, sync (non-async) version of this app collapsed under high concurrency — throughput fell to ~983 req/sec at 500 concurrent connections, down from a healthy ~6,300 req/sec at lower concurrency, with p99 latency blowing out to ~881ms. After the async rewrite, that collapse disappeared entirely: throughput stayed in the 15,000–22,000 req/sec range from 100 concurrent connections all the way up to 2,000, with latency degrading gracefully instead of falling off a cliff.
 
@@ -230,10 +230,11 @@ app/
   frontend/index.html — live dashboard + in-browser benchmark tool
 go.mod / go.sum    — module definition and pinned dependencies
 BENCHMARK.md       — Go vs Python measurements, worker-model analysis, GOMAXPROCS notes
+PYTHON_BENCHMARK.md — historical Python/FastAPI benchmark record and testing commands
 Dockerfile         — production image (what Render builds/deploys)
 ```
 
-The original Python version's load-testing scripts (`loadtest.py`, `locustfile.py`, `gen_vegeta_targets.py`, `seed_cold_data.py`, `test_l1_ttl.py`) and its `BENCHMARK.md` lived in `testing/` and were **not** carried over into this port; they remain in the original repository, along with the long-form article writeup.
+The original Python version's load-testing scripts (`loadtest.py`, `locustfile.py`, `gen_vegeta_targets.py`, `seed_cold_data.py`, `test_l1_ttl.py`) and its `BENCHMARK.md` lived in `testing/` and were **not** carried over into this port; they remain in the original repository, along with the long-form article writeup. Their benchmark results and commands are preserved in [`PYTHON_BENCHMARK.md`](./PYTHON_BENCHMARK.md).
 
 ## Honest limitations
 

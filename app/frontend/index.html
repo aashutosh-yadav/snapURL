@@ -232,7 +232,7 @@
     </div>
 
     <div class="browser-note">
-      <b>Why this number is lower than the README's 20,399 req/sec:</b> your browser tab is a much smaller load generator than a dedicated tool like <code>vegeta</code> — it caps concurrent connections per origin and has its own JS overhead (the project actually ran into this exact lesson earlier, with a Python load tester bottlenecking on its own client before switching to a Go-based one). This demo is honestly measuring what <i>your browser</i> can drive against a real backend, not the server's true ceiling. Full methodology for the real number is in <code>BENCHMARK.md</code>.
+      <b>Why this number is lower than the README's ~85,000 req/sec:</b> that figure is a local <code>hey</code>/<code>vegeta</code> run on an 8-thread laptop with both caches warm. This page is a browser tab — which caps concurrent connections per origin and adds JS overhead — driving a free-tier instance with 0.1 CPU and real network hops to Neon and Upstash. The gap is the point: this measures what your browser can actually drive against the deployed server, not the server's local ceiling. Full methodology is in <code>BENCHMARK.md</code>.
     </div>
   </section>
 

@@ -1,0 +1,19 @@
+# 🔹 Go build output
+/infinity
+*.exe
+*.test
+*.out
+
+# 🔹 Environment variables (if you add later)
+.env
+
+# 🔹 OS junk
+.DS_Store
+Thumbs.db
+
+# 🔹 Editor / IDE
+.vscode/
+.idea/
+
+# 🔹 Logs
+*.log

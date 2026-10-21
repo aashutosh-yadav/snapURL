@@ -222,6 +222,27 @@ Visit `http://127.0.0.1:8000` — the live benchmark tool is right there on the 
 
 A `Dockerfile` also exists and is what the Render deployment builds from (`docker build -t infinity . && docker run -p 8000:8000 infinity` runs it locally). `docker-compose.yml` was dropped in favor of the simpler direct-Dockerfile path.
 
+## Deploying (Render + Neon + Upstash)
+
+Same three-service topology as the original Python deployment, but the app runs as a **single Go process** — do not add workers/replicas unless cold-path throughput matters more than cache locality (see [Why not run multiple workers?](ARTICLE.md#why-not-run-multiple-workers) in `ARTICLE.md`).
+
+1. **Postgres — [Neon](https://neon.tech)** (free): create a project in **AWS US East 2 (Ohio)** and copy the **direct** connection string (the one without `-pooler`). The app appends `sslmode=require` for remote hosts and uses a 12-connection pool, which fits Neon's free limits.
+2. **Redis — [Upstash](https://upstash.com)** (free): create a Redis database in **us-east-2**, enable TLS, and copy the `rediss://` URL (with the password).
+3. **App — [Render](https://render.com)** (free): either
+   - **Blueprint:** New → Blueprint → select this repo. Render reads `render.yaml`, builds the `Dockerfile`, and prompts for `DATABASE_URL` and `REDIS_URL`; or
+   - **Manual:** New → Web Service → select the repo → Runtime **Docker** → Region **Ohio** → Plan **Free** → add the same two env vars (plus `GOMAXPROCS=1`) → Health Check Path `/stats`.
+
+```bash
+# verify the deploy
+curl -s https://<service>.onrender.com/stats
+curl -s -X POST https://<service>.onrender.com/shorten \
+  -H 'Content-Type: application/json' -d '{"long_url":"https://example.com"}'
+```
+
+Keep all three services in the same region — every cold-path request makes a Neon round-trip and every hot-path miss makes an Upstash round-trip. On the free tier the service sleeps after ~15 minutes idle, so the first request afterwards takes ~30–60s and starts with an empty L1; `/stats` is per-process (a true aggregate here, because there is only one process).
+
+`POST /seed_cold` is publicly reachable in this configuration, so anyone can insert rows. That is fine for a demo; put it behind auth or remove the route before treating the service as anything more.
+
 ## Benchmarking
 
 ```bash
